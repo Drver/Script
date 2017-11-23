@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# vim: set et sw=4 ts=4 sts=4 ff=unix fenc=utf8:
+
+# 脚本功能：简化项目构建和部署的流程，方便本地跑服务
+# 条件限制：项目构建基于maven，服务器基于tomcat
+# 
+# 参数：
+#   必填参数：-s 指定tomcat路径
+#   选填参数：
+#     构建相关：-b 有此参数时先构建项目
+#               -t 有此参数时，-Dmaven.test.skip=false，默认为true
+#               -p -b存在时参数必填，指定项目路径
+#               -P 同mvn clean package -P
+#     tomcat相关：
+#               -u 有此参数时修改server.xml文件，指定二级域名
+#               -l tail -f -n200 日志文件
+
+import os
+import sys
+import xml.dom.minidom
+
+params_map = {}
+for i in range(len(sys.argv)):
+    if i == 0:
+        continue
+    if sys.argv[i].startswith('-'):
+        if i + 1 == len(sys.argv):
+            params_map[sys.argv[i]] = ''
+        else:
+            params_map[sys.argv[i]] = sys.argv[i + 1]
+
+if '-h' in params_map.keys():
+    print '脚本功能：简化项目构建和部署的流程，方便本地跑服务'
+    print '条件限制：项目构建基于maven，服务器基于tomcat'
+    print ''
+    print '参数：'
+    print '  必填参数：-s 指定tomcat路径'
+    print '  选填参数：'
+    print '    构建相关：-b 有此参数时先构建项目'
+    print '              -t 有此参数时，-Dmaven.test.skip=false，默认为true'
+    print '              -p -b存在时参数必填，指定项目路径'
+    print '              -P 同mvn clean package -P'
+    print '    tomcat相关：'
+    print '              -u 有此参数时修改server.xml文件，指定二级域名'
+    print '              -l tail -f -n200 日志文件'
+    os._exit(0)
+
+if not '-s' in params_map.keys():
+    print '[Error]: param -s is necessary.'
+    os._exit(0)
+tomcat_path = os.path.abspath(params_map.get('-s'))
+if not tomcat_path.endswith(os.sep):
+    tomcat_path += os.sep
+#mvn build
+# -b build
+# -t do junit test.(default:false)
+# -p identify build path
+# -P mvn's -P
+if '-b' in params_map.keys():
+    if not '-p' in params_map.keys():
+        print '[Error]: param -p is necessary.'
+        os._exit(0)
+    project_path = os.path.abspath(params_map.get('-p'))
+    
+    if '-u' in params_map.keys():
+        url_path = os.path.abspath(params_map.get('-u'))
+    
+    build_command = 'mvn clean package'
+    build_command += ' ' + '-f ' + project_path
+    if '-t' not in params_map.keys():
+        build_command += ' ' + '-Dmaven.test.skip=true'
+    if '-P' in params_map.keys():
+        build_command += ' ' + '-P ' + params_map.get('-P')
+
+    os.system(build_command)
+
+    while True:
+        command_input = raw_input('Maven build finished, continue?[y/n]:')
+        if command_input == 'n':
+            os._exit(0)
+        elif not command_input == 'y':
+            print '[Error]: ' + command_input + ' is not expected.'
+        else:
+            break
+
+    if not project_path.endswith(os.sep):
+        project_path += os.sep
+
+    if '-u' in params_map.keys():
+        print 'Please choose the deploy path:\n'
+        for value in os.listdir(project_path + 'target'):
+            print '\t' + value
+        print ''
+
+        while True:
+            try:
+                command_input = raw_input('input deploy path or press [Ctrl+D] to exit:')
+            except EOFError:
+                os._exit(0)
+            if command_input in os.listdir(project_path + 'target'):
+                deploy_path = project_path + 'target' + os.sep + command_input
+                break;
+            else:
+                print '[Error]:' + command_input + ' can not be a deploy path.'
+
+        deploy_path = os.path.abspath(deploy_path)
+        print 'Deploy path:' + os.path.abspath(deploy_path)
+
+        #modify server.xml
+        # -u url path
+
+        tomcat_conf_server_file = tomcat_path + 'conf' + os.sep + 'server.xml'
+        DOMTree = xml.dom.minidom.parse(tomcat_conf_server_file)
+        server = DOMTree.documentElement
+
+        service = server.getElementsByTagName('Service')[0]
+        engine = service.getElementsByTagName('Engine')[0]
+        host = engine.getElementsByTagName('Host')[0]
+    
+        contexts = host.getElementsByTagName('Context')
+        modify_flag = False
+        for context in contexts:
+            if context.getAttribute('path') == url_path:
+                context.setAttribute('docBase', deploy_path)
+                modify_flag = True
+        if not modify_flag:
+            context = DOMTree.createElement('Context')
+            context.setAttribute('path', url_path)
+            context.setAttribute('docBase', deploy_path)
+            context.setAttribute('reloadable', 'false')
+            host.appendChild(context)
+
+        if('server.xml.bak' in os.listdir(tomcat_path + 'conf' + os.sep)):
+            os.system('rm -rf ' + tomcat_conf_server_file + '.bak')
+        os.system('cp ' + tomcat_conf_server_file + ' ' + tomcat_conf_server_file + '.bak')
+        if('server.xml.bak' in os.listdir(tomcat_path + 'conf' + os.sep)):
+            os.system('rm -rf ' + tomcat_conf_server_file)
+            server_file = open(tomcat_conf_server_file, 'wb')
+            DOMTree.writexml(server_file)
+            server_file.close()
+        else:
+            print '[Error]: ' + 'server.xml.bak is not exist.'
+            os._exit(0)
+
+#start tomcat
+os.system(tomcat_path + 'bin/catalina.sh start')
+if '-l' in params_map.keys():
+    os.system('tail -f -n200 ' + tomcat_path + 'logs/catalina.out')
+
+while True:
+    command_input = raw_input('Start tomcat finished, stop it?[y/n]:')
+    if command_input == 'n':
+        os._exit(0)
+    elif not command_input == 'y':
+        print '[Error]: ' + command_input + ' is not expected.'
+    else:
+        break
+os.system(tomcat_path + 'bin/catalina.sh stop')
