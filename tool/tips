@@ -1,0 +1,19 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+# vim: set et sw=4 ts=4 sts=4 ff=unix fenc=utf8:
+
+# 脚本功能：显示常用指令
+
+print '<Tips>'
+print '<SSH>'
+print '  ssh -p [port] [user]@[host]'
+print ''
+print '<RSYNC>'
+print 'Download:'
+print '  rsync -e \'ssh -p [port]\' -aP [user]@[host]:[source_path] [dest_path]'
+print 'Upload:'
+print '  rsync -e \'ssh -p [port]\' -av [dest_path] [user]@[host]:[source_path]'
+print ''
+print '<Mysql>'
+print '  mysql -h[host] -u[user] -p[password]'
+print ''
